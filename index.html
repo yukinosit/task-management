@@ -14,13 +14,12 @@
   <!-- Chart.js -->
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 
-  <!-- Google API Client & Identity Services (async/deferを外し順序を確保) -->
+  <!-- Google API Client & Identity Services -->
   <script src="https://accounts.google.com/gsi/client"></script>
   <script src="https://apis.google.com/js/api.js"></script>
 
   <style>
     .fc-event { cursor: pointer; border-radius: 4px; padding: 2px 4px; font-size: 0.85rem; }
-    /* Dynamic Status Backgrounds for Cards */
     .status-border-todo { border-left: 5px solid #ef4444; }
     .status-border-doing { border-left: 5px solid #f59e0b; }
     .status-border-submitted { border-left: 5px solid #3b82f6; }
@@ -46,7 +45,7 @@
         <button onclick="switchTab('calendar')" id="tab-calendar" class="tab-btn px-4 py-2 rounded-md text-indigo-200 hover:text-white">
           <i class="fa-regular fa-calendar-days mr-2"></i>カレンダー
         </button>
-        <button onclick="switchTab('integrations')" id="tab-integrations" class="tab-btn px-4 py-2 rounded-md text-indigo-200 hover:text-white relative">
+        <button onclick="switchTab('integrations')" id="tab-integrations" class="tab-btn px-4 py-2 rounded-md text-indigo-200 hover:text-white">
           <i class="fa-solid fa-cloud-arrow-down mr-2"></i>外部連携・Google
         </button>
         <button onclick="switchTab('analytics')" id="tab-analytics" class="tab-btn px-4 py-2 rounded-md text-indigo-200 hover:text-white">
@@ -54,16 +53,22 @@
         </button>
       </nav>
 
-      <button onclick="openModal()" class="bg-amber-400 hover:bg-amber-300 text-indigo-950 font-bold px-4 py-2 rounded-lg shadow transition flex items-center gap-2">
-        <i class="fa-solid fa-plus"></i> 新規課題を追加
-      </button>
+      <div class="flex items-center gap-2">
+        <!-- 通知許可ボタン -->
+        <button onclick="requestNotificationPermission()" id="btn-notification" class="bg-indigo-800 hover:bg-indigo-900 text-yellow-300 font-bold px-3 py-2 rounded-lg text-xs flex items-center gap-2 border border-indigo-500">
+          <i class="fa-solid fa-bell"></i> <span id="noti-btn-text">通知を有効化</span>
+        </button>
+        <button onclick="openModal()" class="bg-amber-400 hover:bg-amber-300 text-indigo-950 font-bold px-4 py-2 rounded-lg shadow transition flex items-center gap-2 text-sm">
+          <i class="fa-solid fa-plus"></i> 新規課題を追加
+        </button>
+      </div>
     </div>
   </header>
 
   <!-- Main Content Container -->
   <main class="max-w-7xl mx-auto px-4 py-6 flex-grow w-full">
 
-    <!-- SECTION 1: 課題一覧・管理 (Tasks View) -->
+    <!-- SECTION 1: 課題一覧・管理 -->
     <section id="section-tasks" class="tab-content block space-y-6">
       <div class="bg-white p-4 rounded-xl shadow-sm border border-slate-200 flex flex-wrap gap-4 items-center justify-between">
         <div class="flex flex-wrap gap-3 items-center w-full md:w-auto">
@@ -251,7 +256,7 @@
           <div>
             <label class="block text-xs font-bold text-slate-600 mb-1">提出場所</label>
             <select id="taskSource" class="w-full border p-2 rounded-lg text-sm outline-none">
-              <option value="Google Classroom">Google Classroom<limk>https://classroom.google.com/</limk></option>
+              <option value="Google Classroom">Google Classroom</option>
               <option value="Microsoft Teams">Microsoft Teams</option>
               <option value="手渡し・紙">手渡し・紙</option>
               <option value="その他Web">その他Web</option>
@@ -304,8 +309,10 @@
 
   <script>
     let tasks = JSON.parse(localStorage.getItem('edutask_tasks_v2')) || [
-      { id: '1', title: '【Classroom】英語 Chapter 4 ワークシート提出', subject: '英語', source: 'Google Classroom', status: 'todo', dueDate: '2026-10-22T23:59', estTime: 45, memo: '提出フォームから提出' }
+      { id: '1', title: '【Classroom】英語 Chapter 4 ワークシート提出', subject: '英語', source: 'Google Classroom', status: 'todo', dueDate: '2026-10-28T23:59', estTime: 45, memo: '提出フォームから提出' }
     ];
+
+    let notifiedTasks = JSON.parse(localStorage.getItem('edutask_notified_v1')) || {};
 
     let calendarInstance = null;
     let statusChart = null;
@@ -323,9 +330,73 @@
       renderTasks();
       initCalendar();
       saveData();
+      checkNotificationState();
+      
+      // 60秒ごとに期限チェックを実行
+      setInterval(checkDueNotifications, 60000);
+      checkDueNotifications();
     });
 
-    function saveData() { localStorage.setItem('edutask_tasks_v2', JSON.stringify(tasks)); }
+    function saveData() { 
+      localStorage.setItem('edutask_tasks_v2', JSON.stringify(tasks));
+      localStorage.setItem('edutask_notified_v1', JSON.stringify(notifiedTasks));
+    }
+
+    // --- 通知機能 Logic ---
+    function checkNotificationState() {
+      if ('Notification' in window) {
+        if (Notification.permission === 'granted') {
+          document.getElementById('noti-btn-text').innerText = '通知: ON';
+          document.getElementById('btn-notification').classList.replace('bg-indigo-800', 'bg-emerald-700');
+        } else if (Notification.permission === 'denied') {
+          document.getElementById('noti-btn-text').innerText = '通知: ブロック中';
+        }
+      } else {
+        document.getElementById('noti-btn-text').innerText = '通知非対応';
+      }
+    }
+
+    function requestNotificationPermission() {
+      if (!('Notification' in window)) {
+        alert('お使いのブラウザはデスクトップ通知に対応していません。');
+        return;
+      }
+      Notification.requestPermission().then(permission => {
+        if (permission === 'granted') {
+          alert('通知が有効化されました！期限が近い課題をお知らせします。');
+          checkNotificationState();
+          checkDueNotifications();
+        } else {
+          alert('通知が拒否されました。ブラウザの設定から変更できます。');
+          checkNotificationState();
+        }
+      });
+    }
+
+    function checkDueNotifications() {
+      if (!('Notification' in window) || Notification.permission !== 'granted') return;
+
+      const now = new Date();
+      const next24Hours = new Date(now.getTime() + 24 * 60 * 60 * 1000);
+
+      tasks.forEach(task => {
+        if (task.status === 'done' || task.status === 'submitted') return;
+
+        const dueDate = new Date(task.dueDate);
+
+        // 24時間以内の締切課題で、まだ通知していない場合
+        if (dueDate > now && dueDate <= next24Hours) {
+          if (!notifiedTasks[task.id]) {
+            new Notification(`⏰ 課題の締切が近づいています`, {
+              body: `【${task.subject}】${task.title}\n締切: ${task.dueDate.replace('T', ' ')}`,
+              icon: 'https://cdn-icons-png.flaticon.com/512/2693/2693507.png'
+            });
+            notifiedTasks[task.id] = true;
+            saveData();
+          }
+        }
+      });
+    }
 
     function switchTab(tabName) {
       document.querySelectorAll('.tab-content').forEach(el => el.classList.add('hidden'));
@@ -407,12 +478,14 @@
       saveData();
       renderTasks();
       if (calendarInstance) updateCalendarEvents();
+      checkDueNotifications();
       closeModal();
     }
 
     function deleteTask(id) {
       if (confirm('この課題を削除しますか？')) {
         tasks = tasks.filter(t => t.id !== id);
+        delete notifiedTasks[id];
         saveData();
         renderTasks();
         if (calendarInstance) updateCalendarEvents();
@@ -596,7 +669,6 @@
       reader.readAsText(file);
     }
 
-    // Google認証
     function handleAuthClick() {
       const clientId = document.getElementById('g-client-id').value;
       const apiKey = document.getElementById('g-api-key').value;
@@ -660,6 +732,7 @@
         }
         saveData();
         renderTasks();
+        checkDueNotifications();
         alert('Google Classroomの提出課題が同期されました！');
       } catch (err) {
         alert('Classroom課題の取得に失敗しました。');
